@@ -1,32 +1,35 @@
-from __future__ import annotations
-
 from urllib.parse import quote
 
 import requests
 
-from crawler.parsers.process_parser import ProcessParser
 from crawler import settings
 
 
 class TRF5Client:
+    """Handle requests to the TRF5 consultation system."""
+
     def __init__(
         self,
-        parser: ProcessParser,
-        base_url: str = settings.BASE_URL,
-        timeout: int = settings.REQUEST_TIMEOUT,
-        session: requests.Session | None = None,
-    ) -> None:
+        parser,
+        base_url=settings.BASE_URL,
+        timeout=settings.REQUEST_TIMEOUT,
+        session=None,
+    ):
         self.parser = parser
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
         self.session = session or requests.Session()
         self.session.headers.update({"User-Agent": settings.USER_AGENT})
 
-    def fetch_process(self, process_number: str) -> dict[str, object]:
+    def fetch_process(self, process_number) -> dict:
+        """Fetch process details by process number."""
+
         html = self._get(f"/processo/{process_number}")
         return self.parser.parse_process(html)
 
-    def search_process_numbers_by_cnpj(self, cnpj: str, limit: int | None = None) -> list[str]:
+    def search_process_numbers_by_cnpj(self, cnpj, limit=None) -> list:
+        """Search process numbers by CNPJ."""
+
         normalized_cnpj = self._normalize_digits(cnpj)
         return self._search_paginated(
             path_template="/processo/cpf/porData/ativos/{term}/{page}",
@@ -36,44 +39,62 @@ class TRF5Client:
 
     def search_process_numbers_by_party_name(
         self,
-        party_name: str,
-        limit: int | None = None,
-    ) -> list[str]:
-        encoded_name = quote(party_name.strip(), safe="/")
+        party_name,
+        limit=None,
+    ) -> list:
+        """Search process numbers by party name."""
+
+        encoded_name = quote(party_name.strip(), safe="")
         return self._search_paginated(
-            path_template="/processo/nomeparte/porData/ativos/{term}/{page}",
+            path_template=(
+                "/processo/nomeparte/porProcesso/ativos/exata/{term}/{page}"
+            ),
             term=encoded_name,
             limit=limit,
+            name_filter=settings.PARTY_NAME_REQUIRED_TEXT,
         )
 
-    def fetch_processes_by_cnpj(self, cnpj: str, limit: int | None = None) -> list[dict[str, object]]:
-        return [self.fetch_process(number) for number in self.search_process_numbers_by_cnpj(cnpj, limit)]
+    def fetch_processes_by_cnpj(self, cnpj, limit=None) -> list:
+        """Fetch process details by CNPJ."""
 
-    def fetch_processes_by_party_name(self, party_name: str, limit: int | None = None) -> list[dict[str, object]]:
-        return [
-            self.fetch_process(number)
-            for number in self.search_process_numbers_by_party_name(party_name, limit)
-        ]
+        return self._fetch_processes(
+            self.search_process_numbers_by_cnpj(cnpj, limit)
+        )
+
+    def fetch_processes_by_party_name(self, party_name, limit=None) -> list:
+        """Fetch process details by party name."""
+
+        process_numbers = self.search_process_numbers_by_party_name(
+            party_name,
+            limit,
+        )
+        return self._fetch_processes(process_numbers)
 
     def _search_paginated(
         self,
-        path_template: str,
-        term: str,
-        limit: int | None = None,
-    ) -> list[str]:
-        collected: list[str] = []
-        seen: set[str] = set()
-        total: int | None = None
+        path_template,
+        term,
+        limit=None,
+        name_filter=None,
+    ):
+        collected = []
+        seen = set()
+        total = None
         page = 0
 
         while True:
             html = self._get(path_template.format(term=term, page=page))
-            page_total, process_numbers = self.parser.parse_search_results(html)
+            page_total, process_numbers, page_size = (
+                self.parser.parse_search_results(
+                    html,
+                    name_filter=name_filter,
+                )
+            )
 
             if total is None:
                 total = page_total
 
-            if not process_numbers:
+            if not process_numbers and not page_size:
                 break
 
             for process_number in process_numbers:
@@ -84,21 +105,29 @@ class TRF5Client:
                 if limit is not None and len(collected) >= limit:
                     return collected
 
-            if total is not None and len(collected) >= total:
+            if name_filter and total is not None:
+                if page_size and (page + 1) * page_size >= total:
+                    break
+            elif total is not None and len(collected) >= total:
                 break
 
             page += 1
 
         return collected
 
-    def _get(self, path: str) -> str:
+    def _fetch_processes(self, process_numbers):
+        return [self.fetch_process(number) for number in process_numbers]
+
+    def _get(self, path):
         response = self.session.get(
-            f"{self.base_url}{path}", timeout=self.timeout)
+            f"{self.base_url}{path}",
+            timeout=self.timeout,
+        )
         response.raise_for_status()
         response.encoding = "iso-8859-1"
         return response.text
 
-    def _normalize_digits(self, value: str) -> str:
+    def _normalize_digits(self, value):
         digits = "".join(char for char in value if char.isdigit())
         if not digits:
             raise ValueError("O valor informado nao contem digitos.")

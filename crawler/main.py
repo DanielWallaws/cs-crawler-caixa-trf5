@@ -1,77 +1,70 @@
-from __future__ import annotations
-
-import argparse
-import json
 import sys
 
+from crawler import settings
 from crawler.client.trf5_client import TRF5Client
 from crawler.parsers.process_parser import ProcessParser
 from crawler.repositories.jsonl_repository import JsonlRepository
-from crawler.settings import DEFAULT_JSONL_PATH
 
 
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Crawler de consulta publica do TRF5.")
-    parser.add_argument(
-        "--output",
-        default=str(DEFAULT_JSONL_PATH),
-        help="Arquivo JSONL de saida. Padrao: %(default)s",
-    )
-    parser.add_argument(
-        "--skip-save",
-        action="store_true",
-        help="Nao salva em JSONL.",
-    )
-    parser.add_argument(
-        "--json",
-        action="store_true",
-        help="Imprime um array JSON no stdout.",
-    )
+def main(argv=None) -> int:
+    """Run the assessment crawler."""
 
-    subparsers = parser.add_subparsers(dest="command", required=True)
-
-    process_parser = subparsers.add_parser("process", help="Busca um processo por numero.")
-    process_parser.add_argument("numero_processo")
-
-    cnpj_parser = subparsers.add_parser("cnpj", help="Busca processos por CNPJ.")
-    cnpj_parser.add_argument("cnpj")
-    cnpj_parser.add_argument("--limit", type=int, default=None, help="Limita a quantidade de processos.")
-
-    party_parser = subparsers.add_parser("party", help="Busca processos por nome da parte.")
-    party_parser.add_argument("nome")
-    party_parser.add_argument("--limit", type=int, default=None, help="Limita a quantidade de processos.")
-
-    return parser
-
-
-def main(argv: list[str] | None = None) -> int:
-    parser = build_parser()
-    args = parser.parse_args(argv)
+    args = sys.argv[1:] if argv is None else argv
+    if args:
+        print(
+            "Erro: este crawler nao recebe argumentos. "
+            "Execute: python3 -m crawler.main",
+            file=sys.stderr,
+        )
+        return 2
 
     client = TRF5Client(parser=ProcessParser())
 
     try:
-        if args.command == "process":
-            processes = [client.fetch_process(args.numero_processo)]
-        elif args.command == "cnpj":
-            processes = client.fetch_processes_by_cnpj(args.cnpj, limit=args.limit)
-        else:
-            processes = client.fetch_processes_by_party_name(args.nome, limit=args.limit)
+        processes = fetch_assessment_processes(client)
     except Exception as exc:
         print(f"Erro: {exc}", file=sys.stderr)
         return 1
 
-    if not args.skip_save:
-        JsonlRepository(args.output).save_all(processes)
-
-    if args.json:
-        print(json.dumps(processes, ensure_ascii=False, indent=2))
-    else:
-        print(f"Processos encontrados: {len(processes)}")
-        if not args.skip_save:
-            print(f"JSONL: {args.output}")
+    JsonlRepository(settings.DEFAULT_JSONL_PATH).save_all(processes)
+    print(f"Processos encontrados: {len(processes)}")
+    print(f"JSONL: {settings.DEFAULT_JSONL_PATH}")
 
     return 0
+
+
+def fetch_assessment_processes(client) -> list:
+    """Fetch and consolidate the assessment process set."""
+
+    process_numbers = list(settings.KNOWN_PROCESSES)
+
+    for cnpj in settings.KNOWN_CNPJS:
+        process_numbers.extend(client.search_process_numbers_by_cnpj(cnpj))
+
+    for party in settings.KNOWN_PARTIES:
+        process_numbers.extend(
+            client.search_process_numbers_by_party_name(party)
+        )
+
+    return [
+        client.fetch_process(process_number)
+        for process_number in _unique(process_numbers)
+    ]
+
+
+def _unique(values):
+    """Return a list of unique values, preserving the original order."""
+
+    seen = set()
+    unique_values = []
+
+    for value in values:
+        if value in seen:
+            continue
+        seen.add(value)
+        unique_values.append(value)
+
+    return unique_values
 
 
 if __name__ == "__main__":

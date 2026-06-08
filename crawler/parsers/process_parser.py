@@ -1,34 +1,35 @@
-from __future__ import annotations
-
 import re
 
-from bs4 import BeautifulSoup, Tag
+from bs4 import BeautifulSoup
 
 NOT_FOUND_MESSAGE = "O processo é inexistente ou tramita em segredo de justiça."
-PROCESS_NUMBER_PATTERN = re.compile(
-    r"PROCESSO\s+N[º°o]\s*(?P<numero>[0-9.\-]+)?(?:\s*\((?P<legado>[0-9.\-]+)\))?",
-    re.IGNORECASE | re.DOTALL,
-)
-AUTUACAO_PATTERN = re.compile(r"AUTUADO EM\s+(\d{2}/\d{2}/\d{4})")
-TOTAL_PATTERN = re.compile(r"Total:\s*(\d+)")
-MOVEMENT_PATTERN = re.compile(r"^Em\s+(\d{2}/\d{2}/\d{4}\s+\d{2}:\d{2})\s*(.*)$", re.DOTALL)
+DATE_PATTERN = re.compile(r"\d{2}/\d{2}/\d{4}")
+PROCESS_LINK_PREFIX = "/processo/"
+
 
 class ProcessParser:
-    def parse_process(self, html: str) -> dict[str, object]:
-        if self.is_not_found(html):
-            raise ValueError("Processo inexistente ou em segredo de justiça.")
+    """Parse TRF5 process and search result pages."""
+
+    def parse_process(self, html) -> dict:
+        """Parse process details from an HTML page."""
 
         soup = BeautifulSoup(html, "html.parser")
-        page_text = self._normalized_text(soup)
+        if self.is_not_found(soup):
+            raise ValueError("Processo inexistente ou em segredo de justiça.")
 
-        numero_processo, numero_legado = self._extract_process_numbers(page_text)
-        data_autuacao = self._extract_autuacao(page_text)
+        heading = self._find_process_heading(soup)
+        numero_processo, numero_legado = self._extract_process_numbers(
+            heading
+        )
+        data_autuacao = self._extract_autuacao(soup)
         relator, envolvidos = self._extract_participants(soup)
         movimentacoes = self._extract_movements(soup)
 
         numero_processo = numero_processo or numero_legado
         if not numero_processo:
-            raise ValueError("Nao foi possivel identificar o numero do processo.")
+            raise ValueError(
+                "Nao foi possivel identificar o numero do processo."
+            )
 
         return {
             "numero_processo": numero_processo,
@@ -39,70 +40,87 @@ class ProcessParser:
             "movimentacoes": movimentacoes,
         }
 
-    def parse_search_results(self, html: str) -> tuple[int, list[str]]:
-        if self.is_not_found(html):
-            return 0, []
+    def parse_search_results(self, html, name_filter=None) -> tuple:
+        """Parse process numbers from an HTML search result page."""
 
         soup = BeautifulSoup(html, "html.parser")
-        page_text = self._normalized_text(soup)
+        if self.is_not_found(soup):
+            return 0, [], 0
 
-        if self.is_process_detail(html):
+        if self.is_process_detail(soup):
             process = self.parse_process(html)
-            return 1, [str(process["numero_processo"])]
+            return 1, [str(process["numero_processo"])], 1
 
         result_table = soup.find("table", class_="consulta_resultados")
         if result_table is None:
             raise ValueError("Tabela de resultados nao encontrada.")
 
-        process_numbers: list[str] = []
-        for anchor in result_table.find_all("a", href=True):
-            href = anchor["href"].strip()
-            if not href.startswith("/processo/"):
-                continue
+        process_numbers, page_size = self._extract_result_links(
+            result_table,
+            name_filter,
+        )
+        return self._extract_total(soup), process_numbers, page_size
 
-            process_number = href.rsplit("/", 1)[-1].strip()
-            if process_number and process_number not in process_numbers:
-                process_numbers.append(process_number)
+    def is_process_detail(self, soup) -> bool:
+        """Check whether an HTML page is a process detail page."""
 
-        total_match = TOTAL_PATTERN.search(page_text)
-        total = int(total_match.group(1)) if total_match else len(process_numbers)
+        return bool(self._find_process_heading(soup))
 
-        return total, process_numbers
+    def is_not_found(self, soup) -> bool:
+        """Check whether an HTML page reports a missing process."""
 
-    def is_process_detail(self, html: str) -> bool:
-        return "PROCESSO N" in html and "AUTUADO EM" in html
+        page_text = self._normalized_text(soup)
+        return NOT_FOUND_MESSAGE in page_text
 
-    def is_not_found(self, html: str) -> bool:
-        return NOT_FOUND_MESSAGE in html
+    def _find_process_heading(self, soup):
+        for paragraph in soup.find_all("p"):
+            text = self._normalized_text(paragraph)
+            if text.startswith("PROCESSO"):
+                return text
+        return ""
 
-    def _extract_process_numbers(self, page_text: str) -> tuple[str | None, str | None]:
-        match = PROCESS_NUMBER_PATTERN.search(page_text)
-        if not match:
+    def _extract_process_numbers(self, heading):
+        if not heading:
             return None, None
 
-        numero_processo = self._clean_optional_text(match.group("numero"))
-        numero_legado = self._clean_optional_text(match.group("legado"))
-        return numero_processo, numero_legado
-
-    def _extract_autuacao(self, page_text: str) -> str | None:
-        match = AUTUACAO_PATTERN.search(page_text)
-        if not match:
-            return None
-        return self._to_iso_date(match.group(1))
-
-    def _extract_participants(self, soup: BeautifulSoup) -> tuple[str | None, list[dict[str, str]]]:
-        participant_table = None
-        for table in soup.find_all("table"):
-            text = self._normalized_text(table)
-            if "RELATOR" in text:
-                participant_table = table
+        content = heading
+        for marker in ("Nº", "N°", "No", "N"):
+            if marker in content:
+                content = content.split(marker, 1)[1]
                 break
 
+        content = self._clean_value(content)
+        if not content:
+            return None, None
+
+        if "(" not in content or ")" not in content:
+            return content, None
+
+        process_number, legacy = content.split("(", 1)
+        legacy = legacy.split(")", 1)[0]
+        process_number = self._clean_optional_text(process_number)
+        legacy = self._clean_optional_text(legacy)
+        return process_number, legacy
+
+    def _extract_autuacao(self, soup):
+        for table in soup.find_all("table"):
+            for cell in table.find_all("td"):
+                text = self._normalized_text(cell)
+                if not text.startswith("AUTUADO EM"):
+                    continue
+
+                match = DATE_PATTERN.search(text)
+                if match:
+                    return self._to_iso_date(match.group(0))
+        return ""
+
+    def _extract_participants(self, soup):
+        participant_table = self._find_participant_table(soup)
         if participant_table is None:
             return None, []
 
-        relator: str | None = None
-        envolvidos: list[dict[str, str]] = []
+        relator = None
+        envolvidos = []
 
         for row in participant_table.find_all("tr"):
             cells = row.find_all("td")
@@ -122,48 +140,168 @@ class ProcessParser:
 
         return relator, envolvidos
 
-    def _extract_movements(self, soup: BeautifulSoup) -> list[dict[str, str]]:
-        movements: list[dict[str, str]] = []
+    def _extract_movements(self, soup):
+        movements = []
 
-        for table in soup.find_all("table"):
-            text = self._normalized_text(table)
-            match = MOVEMENT_PATTERN.match(text)
-            if not match:
+        for anchor in soup.find_all("a", attrs={"name": True}):
+            if not anchor["name"].startswith("mov_"):
                 continue
 
-            movement_date = self._to_iso_datetime(match.group(1))
-            movement_text = self._clean_value(match.group(2))
-            if movement_text:
-                movements.append({"data": movement_date, "texto": movement_text})
+            table = anchor.find_parent("table")
+            movement_date = self._extract_movement_date(anchor)
+            movement_text = self._extract_movement_text(table)
+            if movement_date and movement_text:
+                movements.append(
+                    {"data": movement_date, "texto": movement_text}
+                )
 
         return movements
 
-    def _normalized_text(self, node: BeautifulSoup | Tag) -> str:
-        parts = [" ".join(chunk.split()) for chunk in node.get_text("\n").splitlines()]
+    def _extract_result_links(self, result_table, name_filter=None):
+        process_numbers = []
+        page_size = 0
+        name_index = self._find_column_index(result_table, "Nome")
+
+        for row in self._result_rows(result_table):
+            anchor = self._find_process_anchor(row)
+            if anchor is None:
+                continue
+
+            page_size += 1
+            if name_filter and not self._row_matches_name(
+                row,
+                name_index,
+                name_filter,
+            ):
+                continue
+
+            process_number = self._normalized_text(anchor)
+            if process_number and process_number not in process_numbers:
+                process_numbers.append(process_number)
+
+        return process_numbers, page_size
+
+    def _extract_total(self, soup):
+        for table in soup.find_all("table", class_="consulta_paginas"):
+            total = self._extract_total_from_text(self._normalized_text(table))
+            if total is not None:
+                return total
+
+        result_table = soup.find("table", class_="consulta_resultados")
+        if result_table is None:
+            return 0
+        _, page_size = self._extract_result_links(result_table)
+        return page_size
+
+    def _extract_total_from_text(self, text):
+        marker = "Total:"
+        if marker not in text:
+            return None
+
+        value = text.split(marker, 1)[1].strip().split(" ", 1)[0]
+        return int(value) if value.isdigit() else None
+
+    def _find_column_index(self, table, column_name):
+        headers = [
+            self._normalized_text(header)
+            for header in table.find_all("th")
+        ]
+
+        for index, header in enumerate(headers):
+            if header == column_name:
+                return index
+        return None
+
+    def _result_rows(self, table):
+        body = table.find("tbody")
+        if body is None:
+            return table.find_all("tr")
+        return body.find_all("tr", recursive=False)
+
+    def _find_process_anchor(self, row):
+        for anchor in row.find_all("a", href=True):
+            href = anchor["href"].strip()
+            if not href.startswith(PROCESS_LINK_PREFIX):
+                continue
+            if href.startswith("/processo/rss/"):
+                continue
+            return anchor
+        return None
+
+    def _row_matches_name(self, row, name_index, name_filter):
+        if name_index is None:
+            return True
+
+        cells = row.find_all("td", recursive=False)
+        if name_index >= len(cells):
+            return False
+
+        name = self._normalized_text(cells[name_index]).upper()
+        return name_filter.upper() in name
+
+    def _find_participant_table(self, soup):
+        for table in soup.find_all("table"):
+            labels = [
+                self._clean_label(cell.get_text(" ", strip=True)).upper()
+                for cell in table.find_all("td")
+            ]
+            if "RELATOR" in labels:
+                return table
+        return None
+
+    def _extract_movement_date(self, anchor):
+        text = self._normalized_text(anchor)
+        if not text.startswith("Em "):
+            return ""
+
+        value = text.removeprefix("Em ").strip()
+        return self._to_iso_datetime(value)
+
+    def _extract_movement_text(self, table):
+        if table is None:
+            return ""
+
+        descriptions = []
+        for row in table.find_all("tr")[1:]:
+            cells = row.find_all("td")
+            if not cells:
+                continue
+            text = self._clean_value(cells[-1].get_text(" ", strip=True))
+            if text:
+                descriptions.append(text)
+
+        return self._clean_value(" ".join(descriptions))
+
+    def _normalized_text(self, node):
+        parts = [
+            " ".join(chunk.split())
+            for chunk in node.get_text("\n").splitlines()
+        ]
         return " ".join(part for part in parts if part).strip()
 
-    def _clean_label(self, value: str | None) -> str:
+    def _clean_label(self, value):
         if value is None:
             return ""
         return value.strip().rstrip(":").strip()
 
-    def _clean_value(self, value: str | None) -> str:
+    def _clean_value(self, value):
         if value is None:
             return ""
+
         cleaned = " ".join(value.split()).strip()
         if cleaned.startswith(":"):
             cleaned = cleaned[1:].strip()
         return cleaned
 
-    def _clean_optional_text(self, value: str | None) -> str | None:
+    def _clean_optional_text(self, value):
         cleaned = self._clean_value(value)
         return cleaned or None
 
-    def _to_iso_date(self, value: str) -> str:
+    def _to_iso_date(self, value):
         day, month, year = value.split("/")
         return f"{year}-{month}-{day}"
 
-    def _to_iso_datetime(self, value: str) -> str:
+    def _to_iso_datetime(self, value):
         date_part, time_part = value.split()
         day, month, year = date_part.split("/")
         return f"{year}-{month}-{day} {time_part}"
