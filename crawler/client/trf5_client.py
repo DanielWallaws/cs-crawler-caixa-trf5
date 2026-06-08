@@ -6,7 +6,7 @@ from crawler import settings
 
 
 class TRF5Client:
-    """Handle requests to the TRF5 consultation system."""
+    """Request search and detail pages from the TRF5 consultation system."""
 
     def __init__(
         self,
@@ -22,13 +22,13 @@ class TRF5Client:
         self.session.headers.update({"User-Agent": settings.USER_AGENT})
 
     def fetch_process(self, process_number) -> dict:
-        """Fetch process details by process number."""
+        """Fetch and parse one process detail page."""
 
         html = self._get(f"/processo/{process_number}")
         return self.parser.parse_process(html)
 
     def search_process_numbers_by_cnpj(self, cnpj, limit=None) -> list:
-        """Search process numbers by CNPJ."""
+        """Search active process numbers by CNPJ."""
 
         normalized_cnpj = self._normalize_digits(cnpj)
         return self._search_paginated(
@@ -42,7 +42,7 @@ class TRF5Client:
         party_name,
         limit=None,
     ) -> list:
-        """Search process numbers by party name."""
+        """Search active process numbers by party name and S/A row filter."""
 
         encoded_name = quote(party_name.strip(), safe="")
         return self._search_paginated(
@@ -55,14 +55,14 @@ class TRF5Client:
         )
 
     def fetch_processes_by_cnpj(self, cnpj, limit=None) -> list:
-        """Fetch process details by CNPJ."""
+        """Search by CNPJ and fetch details for each result."""
 
         return self._fetch_processes(
             self.search_process_numbers_by_cnpj(cnpj, limit)
         )
 
     def fetch_processes_by_party_name(self, party_name, limit=None) -> list:
-        """Fetch process details by party name."""
+        """Search by party name and fetch details for each filtered result."""
 
         process_numbers = self.search_process_numbers_by_party_name(
             party_name,
@@ -76,7 +76,8 @@ class TRF5Client:
         term,
         limit=None,
         name_filter=None,
-    ):
+    ) -> list:
+        """Walk paginated search pages and collect process numbers."""
         collected = []
         seen = set()
         total = None
@@ -115,10 +116,10 @@ class TRF5Client:
 
         return collected
 
-    def _fetch_processes(self, process_numbers):
+    def _fetch_processes(self, process_numbers) -> list:
         return [self.fetch_process(number) for number in process_numbers]
 
-    def _get(self, path):
+    def _get(self, path) -> str:
         response = self.session.get(
             f"{self.base_url}{path}",
             timeout=self.timeout,
@@ -127,7 +128,7 @@ class TRF5Client:
         response.encoding = "iso-8859-1"
         return response.text
 
-    def _normalize_digits(self, value):
+    def _normalize_digits(self, value) -> str:
         digits = "".join(char for char in value if char.isdigit())
         if not digits:
             raise ValueError("O valor informado nao contem digitos.")

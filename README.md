@@ -6,10 +6,10 @@ Crawler em Python 3 para a consulta pública do TRF5, usando `requests`,
 ## Arquitetura
 
 O projeto mantém uma arquitetura simples, separando apenas responsabilidades
-necessárias para o assessment:
+necessárias para o crawler:
 
 - `crawler/main.py`: entrada da aplicação e comandos de CLI.
-- `crawler/settings.py`: configurações e dados conhecidos do assessment.
+- `crawler/settings.py`: configurações e dados conhecidos do crawler.
 - `crawler/client/trf5_client.py`: requisições HTTP ao TRF5.
 - `crawler/parsers/process_parser.py`: extração de dados do HTML.
 - `crawler/repositories/jsonl_repository.py`: persistência em JSONL.
@@ -42,7 +42,7 @@ O crawler possui uma única forma de execução:
 python3 -m crawler.main
 ```
 
-Essa execução roda o cenário completo do assessment:
+Essa execução roda o fluxo completo configurado:
 
 1. Consulta os processos conhecidos em `settings.py`.
 2. Busca processos pelos CNPJs configurados.
@@ -63,7 +63,7 @@ tenham `S/A`, evitando depender da busca direta por `CAIXA SEGURADORA S/A`.
 ## JSONL e deduplicação
 
 JSONL foi escolhido porque é simples, legível e suficiente para o volume do
-assessment. Cada linha contém um processo em JSON, o que facilita inspeção,
+fluxo atual. Cada linha contém um processo em JSON, o que facilita inspeção,
 versionamento simples e processamento posterior por scripts.
 
 A deduplicação acontece em duas etapas:
@@ -75,9 +75,9 @@ A deduplicação acontece em duas etapas:
   processo.
 
 Essa abordagem é intencionalmente simples. A limitação é que o arquivo inteiro
-é carregado e regravado a cada persistência. Para o assessment isso é adequado;
-para volumes muito maiores, uma persistência incremental ou banco de dados
-poderia ser avaliado futuramente.
+é carregado e regravado a cada persistência. Para o volume atual isso é
+adequado; para volumes muito maiores, uma persistência incremental ou banco de
+dados poderia ser avaliado futuramente.
 
 ## Possíveis melhorias futuras
 
@@ -87,4 +87,4 @@ poderia ser avaliado futuramente.
 - Retentativas controladas para falhas temporárias de rede.
 
 Essas melhorias não fazem parte do escopo atual para manter o crawler simples e
-aderente ao assessment.
+aderente ao escopo atual.

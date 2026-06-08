@@ -3,14 +3,14 @@ from pathlib import Path
 
 
 class JsonlRepository:
-    """Persist processes in a JSONL file."""
+    """Persist process records in a JSONL file."""
 
     def __init__(self, path):
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
 
     def save_all(self, processes):
-        """Save processes to JSONL, replacing duplicated process numbers."""
+        """Save records, replacing entries with the same process number."""
 
         existing = self._load_index()
 
@@ -22,7 +22,7 @@ class JsonlRepository:
             for process in existing.values():
                 handler.write(json.dumps(process, ensure_ascii=False) + "\n")
 
-    def _load_index(self):
+    def _load_index(self) -> dict:
         if not self.path.exists():
             return {}
 

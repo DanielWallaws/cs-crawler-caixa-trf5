@@ -7,7 +7,7 @@ from crawler.repositories.jsonl_repository import JsonlRepository
 
 
 def main(argv=None) -> int:
-    """Run the assessment crawler."""
+    """Run the configured crawler flow and persist the results."""
 
     args = sys.argv[1:] if argv is None else argv
     if args:
@@ -21,7 +21,7 @@ def main(argv=None) -> int:
     client = TRF5Client(parser=ProcessParser())
 
     try:
-        processes = fetch_assessment_processes(client)
+        processes = fetch_configured_processes(client)
     except Exception as exc:
         print(f"Erro: {exc}", file=sys.stderr)
         return 1
@@ -33,8 +33,8 @@ def main(argv=None) -> int:
     return 0
 
 
-def fetch_assessment_processes(client) -> list:
-    """Fetch and consolidate the assessment process set."""
+def fetch_configured_processes(client) -> list:
+    """Collect configured process numbers and fetch their details."""
 
     process_numbers = list(settings.KNOWN_PROCESSES)
 
@@ -52,7 +52,7 @@ def fetch_assessment_processes(client) -> list:
     ]
 
 
-def _unique(values):
+def _unique(values) -> list:
     """Return a list of unique values, preserving the original order."""
 
     seen = set()
