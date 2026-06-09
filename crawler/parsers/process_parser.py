@@ -21,6 +21,9 @@ class ProcessParser:
         numero_processo, numero_legado = self._extract_process_numbers(
             heading
         )
+        if not numero_legado:
+            numero_legado = self._extract_legacy_number(soup)
+
         data_autuacao = self._extract_autuacao(soup)
         relator, envolvidos = self._extract_participants(soup)
         movimentacoes = self._extract_movements(soup)
@@ -101,6 +104,35 @@ class ProcessParser:
         process_number = self._clean_optional_text(process_number)
         legacy = self._clean_optional_text(legacy)
         return process_number, legacy
+
+    def _extract_legacy_number(self, soup) -> str | None:
+        heading_found = False
+        inspected = 0
+
+        for paragraph in soup.find_all("p"):
+            text = self._normalized_text(paragraph)
+
+            if not heading_found:
+                heading_found = text.startswith("PROCESSO")
+                continue
+
+            if not text:
+                continue
+
+            inspected += 1
+            legacy = self._extract_parenthesized_text(text)
+            if legacy:
+                return legacy
+            if inspected >= 3:
+                break
+
+        return None
+
+    def _extract_parenthesized_text(self, text) -> str | None:
+        text = self._clean_value(text)
+        if text.startswith("(") and text.endswith(")"):
+            return self._clean_optional_text(text[1:-1])
+        return None
 
     def _extract_autuacao(self, soup) -> str:
         for table in soup.find_all("table"):

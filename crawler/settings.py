@@ -7,6 +7,7 @@ load_dotenv()
 
 BASE_URL = os.getenv("TRF5_BASE_URL", "https://cp.trf5.jus.br")
 REQUEST_TIMEOUT = int(os.getenv("TRF5_REQUEST_TIMEOUT", "30"))
+SAVE_BATCH_SIZE = int(os.getenv("TRF5_SAVE_BATCH_SIZE", "25"))
 DEFAULT_JSONL_PATH = Path(os.getenv("TRF5_OUTPUT_PATH", "data/processes.jsonl"))
 USER_AGENT = os.getenv(
     "TRF5_USER_AGENT",

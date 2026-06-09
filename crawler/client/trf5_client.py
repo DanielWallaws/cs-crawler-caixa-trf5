@@ -14,11 +14,13 @@ class TRF5Client:
         base_url=settings.BASE_URL,
         timeout=settings.REQUEST_TIMEOUT,
         session=None,
+        progress=None,
     ):
         self.parser = parser
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
         self.session = session or requests.Session()
+        self.progress = progress
         self.session.headers.update({"User-Agent": settings.USER_AGENT})
 
     def fetch_process(self, process_number) -> dict:
@@ -35,6 +37,7 @@ class TRF5Client:
             path_template="/processo/cpf/porData/ativos/{term}/{page}",
             term=normalized_cnpj,
             limit=limit,
+            progress_label=f"CNPJ {cnpj}",
         )
 
     def search_process_numbers_by_party_name(
@@ -52,6 +55,7 @@ class TRF5Client:
             term=encoded_name,
             limit=limit,
             name_filter=settings.PARTY_NAME_REQUIRED_TEXT,
+            progress_label=f"parte {party_name}",
         )
 
     def fetch_processes_by_cnpj(self, cnpj, limit=None) -> list:
@@ -76,11 +80,13 @@ class TRF5Client:
         term,
         limit=None,
         name_filter=None,
+        progress_label=None,
     ) -> list:
         """Walk paginated search pages and collect process numbers."""
         collected = []
         seen = set()
         total = None
+        scanned = 0
         page = 0
 
         while True:
@@ -98,18 +104,29 @@ class TRF5Client:
             if not process_numbers and not page_size:
                 break
 
+            scanned += page_size
+            reached_limit = False
             for process_number in process_numbers:
                 if process_number in seen:
                     continue
                 seen.add(process_number)
                 collected.append(process_number)
                 if limit is not None and len(collected) >= limit:
-                    return collected
-
-            if name_filter and total is not None:
-                if page_size and (page + 1) * page_size >= total:
+                    reached_limit = True
                     break
-            elif total is not None and len(collected) >= total:
+
+            self._log_search_page(
+                progress_label,
+                page,
+                total,
+                page_size,
+                len(process_numbers),
+                len(collected),
+            )
+            if reached_limit:
+                return collected
+
+            if total is not None and scanned >= total:
                 break
 
             page += 1
@@ -133,3 +150,24 @@ class TRF5Client:
         if not digits:
             raise ValueError("O valor informado nao contem digitos.")
         return digits
+
+    def _log_search_page(
+        self,
+        progress_label,
+        page,
+        total,
+        page_size,
+        selected_count,
+        collected_count,
+    ):
+        if self.progress is None or progress_label is None:
+            return
+
+        message = (
+            f"Busca {progress_label}: página {page + 1}, "
+            f"{page_size} linhas, {selected_count} selecionados, "
+            f"{collected_count} únicos"
+        )
+        if total is not None:
+            message = f"{message}, total {total}"
+        self.progress(message)
