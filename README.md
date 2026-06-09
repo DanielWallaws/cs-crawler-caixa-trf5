@@ -1,4 +1,4 @@
-# CS-CROWLER-CAIXA-TRF5
+# CS-CRAWLER-CAIXA-TRF5
 
 Crawler em Python 3 para a consulta pública do TRF5, usando `requests`,
 `BeautifulSoup4` e persistência em JSONL.
@@ -30,7 +30,7 @@ A pasta `docs/` contém dois diagramas de apoio:
 Execute os comandos a partir da pasta raiz do projeto:
 
 ```bash
-cd cs-crowler-caixa-trf5
+cd <pasta-do-projeto>
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
@@ -43,7 +43,7 @@ TRF5_BASE_URL=https://cp.trf5.jus.br
 TRF5_REQUEST_TIMEOUT=30
 TRF5_SAVE_BATCH_SIZE=25
 TRF5_OUTPUT_PATH=data/processes.jsonl
-TRF5_USER_AGENT=cs-crowler-caixa-trf5/1.0
+TRF5_USER_AGENT=cs-crawler-caixa-trf5/1.0
 ```
 
 ## Execução
@@ -51,7 +51,7 @@ TRF5_USER_AGENT=cs-crowler-caixa-trf5/1.0
 O crawler possui uma única forma de execução:
 
 ```bash
-cd cs-crowler-caixa-trf5
+cd <pasta-do-projeto>
 source .venv/bin/activate
 python3 -m crawler.main
 ```
